@@ -1,4 +1,4 @@
-package com.bjw.bean;
+package com.lime.bean;
 
 import java.text.SimpleDateFormat;
 

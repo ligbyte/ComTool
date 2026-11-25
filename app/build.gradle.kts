@@ -3,12 +3,12 @@ plugins {
 }
 
 android {
-    namespace = "com.bjw.ComTool"
+    namespace = "com.lime.ComTool"
     compileSdk = 34
     ndkVersion = "26.1.10909125"
 
     defaultConfig {
-        applicationId = "com.bjw.ComAssistant"
+        applicationId = "com.lime.ComAssistant"
         minSdk = 24
         targetSdk = 34
         versionCode = 1

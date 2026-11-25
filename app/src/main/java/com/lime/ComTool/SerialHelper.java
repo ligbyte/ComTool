@@ -1,4 +1,4 @@
-package com.bjw.ComTool;
+package com.lime.ComTool;
 
 import java.io.File;
 import java.io.IOException;
@@ -6,7 +6,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.security.InvalidParameterException;
 
-import com.bjw.bean.ComBean;
+import com.lime.bean.ComBean;
 import android_serialport_api.SerialPort;
 
 

@@ -1,4 +1,4 @@
-package com.bjw.ComTool;
+package com.lime.ComTool;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -10,8 +10,8 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
-import com.bjw.bean.AssistBean;
-import com.bjw.bean.ComBean;
+import com.lime.bean.AssistBean;
+import com.lime.bean.ComBean;
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -95,7 +95,7 @@ public class ComToolActivity extends Activity {
 	{
     	String appName = getString(R.string.app_name);
         try {
-			PackageInfo pinfo = getPackageManager().getPackageInfo("com.bjw.ComTool", PackageManager.GET_CONFIGURATIONS);
+			PackageInfo pinfo = getPackageManager().getPackageInfo("com.lime.ComTool", PackageManager.GET_CONFIGURATIONS);
 			String versionName = pinfo.versionName;
 //			String versionCode = String.valueOf(pinfo.versionCode);
 			setTitle(appName+" V"+versionName);

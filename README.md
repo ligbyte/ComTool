@@ -34,13 +34,6 @@ Build #AI-241.18034.62.2412.12169539, built on August 1, 2024
 Runtime version: 17.0.11+0--11852314 amd64
 VM: OpenJDK 64-Bit Server VM by JetBrains s.r.o.
 Windows 11.0
-GC: G1 Young Generation, G1 Old Generation
-Memory: 4068M
-Cores: 20
-Non-Bundled Plugins:
-com.novelreader.plugin (1.0.0)
-Statistic (4.3.1)
-Dart (241.18808)
-io.flutter (85.2.1)
+
 
 
