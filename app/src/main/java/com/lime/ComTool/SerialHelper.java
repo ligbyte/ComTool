@@ -100,15 +100,12 @@ public abstract class SerialHelper{
 					byte[] buffer=new byte[512];
 					int size = mInputStream.read(buffer);
 					if (size > 0){
+						onBeforeDataReceived();
 						ComBean ComRecData = new ComBean(sPort,buffer,size);
 						onDataReceived(ComRecData);
-					}
-					try
+					} else
 					{
-						Thread.sleep(50);//延时50ms
-					} catch (InterruptedException e)
-					{
-						e.printStackTrace();
+						Thread.sleep(10);
 					}
 				} catch (Throwable e)
 				{
@@ -247,5 +244,7 @@ public abstract class SerialHelper{
 		}
 	}
 	//----------------------------------------------------
+	protected void onBeforeDataReceived(){
+	}
 	protected abstract void onDataReceived(ComBean ComRecData);
 }

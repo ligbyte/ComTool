@@ -16,11 +16,14 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import com.lime.bean.AssistBean;
 import com.lime.bean.ComBean;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -32,12 +35,16 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.InputType;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.method.KeyListener;
 import android.text.method.NumberKeyListener;
 import android.text.method.TextKeyListener;
 import android.text.method.TextKeyListener.Capitalize;
+import android.text.style.ForegroundColorSpan;
 import android.util.Base64;
 import android.view.KeyEvent;
 import android.view.Menu;
@@ -71,17 +78,32 @@ public class ComToolActivity extends Activity {
 	SerialPortFinder mSerialPortFinder;//串口设备搜索
 	AssistBean AssistData;//用于界面数据序列化和反序列化
 	int iRecLines=0;//接收区行数
+	final ArrayList<Long> logTimes = new ArrayList<Long>();
 	boolean showMillis=false;
 	boolean showTx=false;
 	boolean showMulti=false;
 	boolean showSaveLog=false;
+	boolean persistSpinners=false;
 	CheckBox dialogSaveCheck;
 	ExecutorService logWriter;
+	ExecutorService commandExecutor;
+	Future<?> sendFutureA,sendFutureB,sendFutureC,sendFutureD;
+	static final int REPLY_TIMEOUT_MS=10;
 	static final String PREF_SETTINGS="ComToolSettings";
 	static final String KEY_MILLIS="show_millis";
 	static final String KEY_TX="show_tx";
 	static final String KEY_MULTI="show_multi";
 	static final String KEY_SAVE="save_log";
+	static final String KEY_TXT="txt_mode";
+	static final String KEY_AUTO_CLEAR="auto_clear";
+	static final String KEY_PORT_A="port_a";
+	static final String KEY_PORT_B="port_b";
+	static final String KEY_PORT_C="port_c";
+	static final String KEY_PORT_D="port_d";
+	static final String KEY_BAUD_A="baud_a";
+	static final String KEY_BAUD_B="baud_b";
+	static final String KEY_BAUD_C="baud_c";
+	static final String KEY_BAUD_D="baud_d";
 	static final int REQ_STORAGE=1001;
     /** Called when the activity is first created. */
     @Override
@@ -96,6 +118,7 @@ public class ComToolActivity extends Activity {
         DispQueue.start();
         AssistData = getAssistData();
         logWriter = Executors.newSingleThreadExecutor();
+        commandExecutor = Executors.newCachedThreadPool();
         loadSettings();
         setControls();
         bindSendLogger();
@@ -107,9 +130,17 @@ public class ComToolActivity extends Activity {
     	CloseComPort(ComB);
     	CloseComPort(ComC);
     	CloseComPort(ComD);
+    	cancelCommand(ComA);
+    	cancelCommand(ComB);
+    	cancelCommand(ComC);
+    	cancelCommand(ComD);
     	if (logWriter != null)
 		{
 			logWriter.shutdown();
+		}
+    	if (commandExecutor != null)
+		{
+			commandExecutor.shutdownNow();
 		}
     	super.onDestroy();
     }
@@ -151,6 +182,8 @@ public class ComToolActivity extends Activity {
         	e.printStackTrace();
         }
     	editTextRecDisp=(EditText)findViewById(R.id.editTextRecDisp);
+    	logTimes.clear();
+    	iRecLines = 0;
     	editTextCOMA=(EditText)findViewById(R.id.editTextCOMA);
     	editTextCOMB=(EditText)findViewById(R.id.editTextCOMB);
     	editTextCOMC=(EditText)findViewById(R.id.editTextCOMC);
@@ -205,6 +238,7 @@ public class ComToolActivity extends Activity {
     	radioButtonTxt.setOnClickListener(new radioButtonClickEvent());
     	radioButtonHex.setOnClickListener(new radioButtonClickEvent());
     	ButtonClear.setOnClickListener(new ButtonClickEvent());
+    	findViewById(R.id.ButtonCopy).setOnClickListener(new ButtonClickEvent());
     	ButtonSendCOMA.setOnClickListener(new ButtonClickEvent());
     	ButtonSendCOMB.setOnClickListener(new ButtonClickEvent());
     	ButtonSendCOMC.setOnClickListener(new ButtonClickEvent());
@@ -213,6 +247,12 @@ public class ComToolActivity extends Activity {
     	toggleButtonCOMB.setOnCheckedChangeListener(new ToggleButtonCheckedChangeEvent());
     	toggleButtonCOMC.setOnCheckedChangeListener(new ToggleButtonCheckedChangeEvent());
     	toggleButtonCOMD.setOnCheckedChangeListener(new ToggleButtonCheckedChangeEvent());
+    	checkBoxAutoClear.setChecked(getSettings().getBoolean(KEY_AUTO_CLEAR, true));
+    	checkBoxAutoClear.setOnCheckedChangeListener(new CheckBox.OnCheckedChangeListener() {
+			public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+				saveSetting(KEY_AUTO_CLEAR, isChecked);
+			}
+		});
     	checkBoxAutoCOMA.setOnCheckedChangeListener(new CheckBoxChangeEvent());
     	checkBoxAutoCOMB.setOnCheckedChangeListener(new CheckBoxChangeEvent());
     	checkBoxAutoCOMC.setOnCheckedChangeListener(new CheckBoxChangeEvent());
@@ -225,10 +265,10 @@ public class ComToolActivity extends Activity {
     	SpinnerBaudRateCOMB.setAdapter(adapter);
     	SpinnerBaudRateCOMC.setAdapter(adapter);
     	SpinnerBaudRateCOMD.setAdapter(adapter);
-    	SpinnerBaudRateCOMA.setSelection(12);
-    	SpinnerBaudRateCOMB.setSelection(12);
-    	SpinnerBaudRateCOMC.setSelection(12);
-    	SpinnerBaudRateCOMD.setSelection(12);
+    	selectSavedItem(SpinnerBaudRateCOMA, KEY_BAUD_A, 12);
+    	selectSavedItem(SpinnerBaudRateCOMB, KEY_BAUD_B, 12);
+    	selectSavedItem(SpinnerBaudRateCOMC, KEY_BAUD_C, 12);
+    	selectSavedItem(SpinnerBaudRateCOMD, KEY_BAUD_D, 12);
     	
     	mSerialPortFinder= new SerialPortFinder();
     	String[] entryValues = mSerialPortFinder.getAllDevicesPath();
@@ -243,22 +283,10 @@ public class ComToolActivity extends Activity {
 		SpinnerCOMB.setAdapter(aspnDevices);
 		SpinnerCOMC.setAdapter(aspnDevices);
 		SpinnerCOMD.setAdapter(aspnDevices);
-		if (allDevices.size()>0)
-		{
-			SpinnerCOMA.setSelection(0);
-		}
-		if (allDevices.size()>1)
-		{
-			SpinnerCOMB.setSelection(1);
-		}
-		if (allDevices.size()>2)
-		{
-			SpinnerCOMC.setSelection(2);
-		}
-		if (allDevices.size()>3)
-		{
-			SpinnerCOMD.setSelection(3);
-		}
+		selectSavedItem(SpinnerCOMA, KEY_PORT_A, 0);
+		selectSavedItem(SpinnerCOMB, KEY_PORT_B, 1);
+		selectSavedItem(SpinnerCOMC, KEY_PORT_C, 2);
+		selectSavedItem(SpinnerCOMD, KEY_PORT_D, 3);
 		SpinnerCOMA.setOnItemSelectedListener(new ItemSelectedEvent());
 		SpinnerCOMB.setOnItemSelectedListener(new ItemSelectedEvent());
 		SpinnerCOMC.setOnItemSelectedListener(new ItemSelectedEvent());
@@ -269,6 +297,12 @@ public class ComToolActivity extends Activity {
 		SpinnerBaudRateCOMD.setOnItemSelectedListener(new ItemSelectedEvent());
 		DispAssistData(AssistData);
 		applyPortVisibility();
+		persistSpinners = false;
+		editTextRecDisp.post(new Runnable() {
+			public void run() {
+				persistSpinners = true;
+			}
+		});
 	}
     //----------------------------------------------------串口号或波特率变化时，关闭打开的串口
     class ItemSelectedEvent implements Spinner.OnItemSelectedListener{
@@ -294,6 +328,10 @@ public class ComToolActivity extends Activity {
 				CloseComPort(ComD);
 				checkBoxAutoCOMA.setChecked(false);
 				toggleButtonCOMD.setChecked(false);
+			}
+			if (persistSpinners)
+			{
+				savePortAndBaud();
 			}
 		}
 
@@ -370,31 +408,11 @@ public class ComToolActivity extends Activity {
 		{
 			if (v==radioButtonTxt)
 			{
-				KeyListener TxtkeyListener = new TextKeyListener(Capitalize.NONE, false);
-				editTextCOMA.setKeyListener(TxtkeyListener);
-				editTextCOMB.setKeyListener(TxtkeyListener);
-				editTextCOMC.setKeyListener(TxtkeyListener);
-				editTextCOMD.setKeyListener(TxtkeyListener);
-				AssistData.setTxtMode(true);
+				applyInputMode(true);
+				saveSetting(KEY_TXT, true);
 			}else if (v==radioButtonHex) {
-				KeyListener HexkeyListener = new NumberKeyListener()
-				{
-					public int getInputType()
-					{
-						return InputType.TYPE_CLASS_TEXT;
-					}
-					@Override
-					protected char[] getAcceptedChars()
-					{
-						return new char[]{'0','1','2','3','4','5','6','7','8','9',
-								'a','b','c','d','e','f','A','B','C','D','E','F'};
-					}
-				};
-				editTextCOMA.setKeyListener(HexkeyListener);
-				editTextCOMB.setKeyListener(HexkeyListener);
-				editTextCOMC.setKeyListener(HexkeyListener);
-				editTextCOMD.setKeyListener(HexkeyListener);
-				AssistData.setTxtMode(false);
+				applyInputMode(false);
+				saveSetting(KEY_TXT, false);
 			}
 			editTextCOMA.setText(AssistData.getSendA());
 			editTextCOMB.setText(AssistData.getSendB());
@@ -450,7 +468,9 @@ public class ComToolActivity extends Activity {
 		public void onClick(View v)
 		{
 			if (v == ButtonClear){
-				editTextRecDisp.setText("");
+				clearLogDisplay();
+			} else if (v.getId() == R.id.ButtonCopy){
+				copyLog();
 			} else if (v== ButtonSendCOMA){
 				sendPortData(ComA, editTextCOMA.getText().toString());
 			}else if (v== ButtonSendCOMB){
@@ -566,6 +586,60 @@ public class ComToolActivity extends Activity {
 		public SerialControl(){
 		}
 
+		private final Object replyLock = new Object();
+		private long replyAt;
+
+		void armReply(){
+			synchronized (replyLock)
+			{
+				replyAt = 0L;
+			}
+		}
+		@Override
+		protected void onBeforeDataReceived(){
+			synchronized (replyLock)
+			{
+				replyAt = SystemClock.elapsedRealtime();
+				replyLock.notifyAll();
+			}
+		}
+		boolean waitForReply(int timeoutMs) throws InterruptedException{
+			long start = SystemClock.elapsedRealtime();
+			synchronized (replyLock)
+			{
+				while (true)
+				{
+					if (Thread.currentThread().isInterrupted())
+					{
+						throw new InterruptedException();
+					}
+					long now = SystemClock.elapsedRealtime();
+					long rx = replyAt;
+					if (rx > 0)
+					{
+						long silentFor = now - rx;
+						if (silentFor >= timeoutMs)
+						{
+							return true;
+						}
+						replyLock.wait(Math.max(1, timeoutMs - silentFor));
+					} else
+					{
+						long remain = timeoutMs - (now - start);
+						if (remain <= 0)
+						{
+							if (replyAt > 0)
+							{
+								continue;
+							}
+							return false;
+						}
+						replyLock.wait(remain);
+					}
+				}
+			}
+		}
+
 		@Override
 		protected void onDataReceived(final ComBean ComRecData)
 		{
@@ -573,15 +647,13 @@ public class ComToolActivity extends Activity {
 			//直接刷新显示，接收数据量大时，卡顿明显，但接收与显示同步。
 			//用线程定时刷新显示可以获得较流畅的显示效果，但是接收数据速度快于显示速度时，显示会滞后。
 			//最终效果差不多-_-，线程定时刷新稍好一些。
-			DispQueue.AddQueue(ComRecData);//线程定时刷新显示(推荐)
-			/*
-			runOnUiThread(new Runnable()//直接刷新显示
+			runOnUiThread(new Runnable()
 			{
 				public void run()
 				{
 					DispRecData(ComRecData);
 				}
-			});*/
+			});
 		}
     }
     //----------------------------------------------------刷新显示线程
@@ -620,6 +692,11 @@ public class ComToolActivity extends Activity {
     //----------------------------------------------------刷新界面数据
     private void DispAssistData(AssistBean AssistData)
 	{
+    	boolean txtMode = getSettings().contains(KEY_TXT)
+    			? getSettings().getBoolean(KEY_TXT, true)
+    			: AssistData.isTxt();
+    	applyInputMode(txtMode);
+    	saveSetting(KEY_TXT, txtMode);
     	editTextCOMA.setText(AssistData.getSendA());
     	editTextCOMB.setText(AssistData.getSendB());
     	editTextCOMC.setText(AssistData.getSendC());
@@ -628,13 +705,6 @@ public class ComToolActivity extends Activity {
     	setSendData(editTextCOMB);
     	setSendData(editTextCOMC);
     	setSendData(editTextCOMD);
-    	if (AssistData.isTxt())
-		{
-			radioButtonTxt.setChecked(true);
-		} else
-		{
-			radioButtonHex.setChecked(true);
-		}
     	editTextTimeCOMA.setText(AssistData.sTimeA);
     	editTextTimeCOMB.setText(AssistData.sTimeB);
     	editTextTimeCOMC.setText(AssistData.sTimeC);
@@ -735,28 +805,32 @@ public class ComToolActivity extends Activity {
     }
     //----------------------------------------------------显示接收数据
     private void DispRecData(ComBean ComRecData){
-    	appendLogLine(formatFrame(ComRecData.sRecTime, ComRecData.sComPort, false, ComRecData.bRec));
+    	appendLogLine(ComRecData.lRecTime, formatFrame(ComRecData.sRecTime, ComRecData.sComPort, false, ComRecData.bRec));
     }
     private void showSentFrame(final SerialHelper port, final byte[] data){
     	if (!showTx || port == null || data == null)
 		{
 			return;
 		}
-    	final String line = formatFrame(currentTime(), port.getPort(), true, data);
+    	final long timeMillis = System.currentTimeMillis();
+    	final String line = formatFrame(formatTime(timeMillis), port.getPort(), true, data);
     	runOnUiThread(new Runnable()
 		{
 			public void run()
 			{
 				if (showTx)
 				{
-					appendLogLine(line);
+					appendLogLine(timeMillis, line);
 				}
 			}
 		});
     }
     private String currentTime(){
+    	return formatTime(System.currentTimeMillis());
+    }
+    private String formatTime(long timeMillis){
     	String pattern = showMillis ? "hh:mm:ss.SSS" : "hh:mm:ss";
-    	return new SimpleDateFormat(pattern).format(new Date());
+    	return new SimpleDateFormat(pattern).format(new Date(timeMillis));
     }
     private String formatFrame(String time, String port, boolean sent, byte[] data){
     	StringBuilder sMsg=new StringBuilder();
@@ -779,18 +853,76 @@ public class ComToolActivity extends Activity {
     	sMsg.append("\r\n");
     	return sMsg.toString();
     }
-    private void appendLogLine(String line){
-    	editTextRecDisp.append(line);
+    private void appendTimeoutLine(SerialHelper port, String command){
+    	long timeMillis = System.currentTimeMillis();
+    	String line = formatTime(timeMillis) + "[" + port.getPort() + "]接收=> 超时(" + command + ")\r\n";
+    	SpannableString span = new SpannableString(line);
+    	span.setSpan(new ForegroundColorSpan(getResources().getColor(R.color.timeout_text, getTheme())),
+    			0, line.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    	appendLogLine(timeMillis, span);
+    }
+    private void appendLogLine(long timeMillis, CharSequence line){
+    	int index = logTimes.size();
+    	while (index > 0 && logTimes.get(index - 1) > timeMillis)
+		{
+			index--;
+		}
+    	editTextRecDisp.getText().insert(offsetOfLogLine(index), line);
+    	logTimes.add(index, timeMillis);
     	iRecLines++;
     	if ((iRecLines > 500) && (checkBoxAutoClear.isChecked()))
 		{
-    		editTextRecDisp.setText("");
-    		iRecLines=0;
+    		clearLogDisplay();
 		}
     	if (showSaveLog)
 		{
-			appendLogFile(line);
+			appendLogFile(line.toString());
 		}
+    }
+    private int offsetOfLogLine(int lineIndex){
+    	if (lineIndex <= 0)
+		{
+			return 0;
+		}
+    	CharSequence text = editTextRecDisp.getText();
+    	if (lineIndex >= logTimes.size())
+		{
+			return text.length();
+		}
+    	int count = 0;
+    	for (int i = 0; i < text.length(); i++)
+		{
+			if (text.charAt(i) == '\n')
+			{
+				count++;
+				if (count == lineIndex)
+				{
+					return i + 1;
+				}
+			}
+		}
+    	return text.length();
+    }
+    private void clearLogDisplay(){
+    	editTextRecDisp.setText("");
+    	logTimes.clear();
+    	iRecLines = 0;
+    }
+    private void copyLog(){
+    	CharSequence text = editTextRecDisp.getText();
+    	if (text == null || text.length() == 0)
+		{
+			ShowMessage("日志为空");
+			return;
+		}
+    	ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+    	if (clipboard == null)
+		{
+			ShowMessage("复制失败");
+			return;
+		}
+    	clipboard.setPrimaryClip(ClipData.newPlainText("com_log", text.toString()));
+    	ShowMessage("已复制");
     }
     //----------------------------------------------------设置自动发送模式开关
     private void SetAutoSend(SerialHelper ComPort,boolean isAutoSend){
@@ -803,20 +935,123 @@ public class ComToolActivity extends Activity {
 		}
     }
     //----------------------------------------------------串口发送
-    private void sendPortData(SerialHelper ComPort,String sOut){
-    	if (ComPort!=null && ComPort.isOpen())
+    private void sendPortData(final SerialControl ComPort,String sOut){
+    	if (ComPort==null || !ComPort.isOpen() || commandExecutor==null)
 		{
-    		if (radioButtonTxt.isChecked())
-			{
-				ComPort.sendTxt(sOut);
-			}else if (radioButtonHex.isChecked()) {
-				ComPort.sendHex(sOut);
+			return;
+		}
+    	final List<String> lines = splitCommands(sOut);
+    	if (lines.isEmpty())
+		{
+			return;
+		}
+    	final boolean hex = radioButtonHex.isChecked();
+    	Future<?> previous = swapSendFuture(ComPort, null);
+    	if (previous != null)
+		{
+			previous.cancel(true);
+		}
+    	Future<?> task = commandExecutor.submit(new Runnable() {
+			public void run() {
+				for (int i = 0; i < lines.size(); i++)
+				{
+					if (Thread.currentThread().isInterrupted() || !ComPort.isOpen())
+					{
+						return;
+					}
+					String line = lines.get(i);
+					byte[] data;
+					try
+					{
+						data = hex ? MyFunc.HexToByteArr(line) : line.getBytes();
+					} catch (Exception e)
+					{
+						final String bad = line;
+						runOnUiThread(new Runnable() {
+							public void run() {
+								ShowMessage("命令格式错误: " + bad);
+							}
+						});
+						continue;
+					}
+					if (data == null || data.length == 0)
+					{
+						continue;
+					}
+					ComPort.armReply();
+					ComPort.send(data);
+					boolean replied;
+					try
+					{
+						replied = ComPort.waitForReply(REPLY_TIMEOUT_MS);
+					} catch (InterruptedException e)
+					{
+						Thread.currentThread().interrupt();
+						return;
+					}
+					if (!replied)
+					{
+						final String command = line;
+						runOnUiThread(new Runnable() {
+							public void run() {
+								appendTimeoutLine(ComPort, command);
+							}
+						});
+					}
+				}
 			}
+		});
+    	swapSendFuture(ComPort, task);
+    }
+    private List<String> splitCommands(String text){
+    	List<String> lines = new ArrayList<String>();
+    	if (text == null)
+		{
+			return lines;
+		}
+    	String[] parts = text.split("\\r?\\n");
+    	for (int i = 0; i < parts.length; i++)
+		{
+			String line = parts[i].trim();
+			if (line.length() > 0)
+			{
+				lines.add(line);
+			}
+		}
+    	return lines;
+    }
+    private Future<?> swapSendFuture(SerialHelper port, Future<?> next){
+    	Future<?> old;
+    	if (port == ComA)
+		{
+			old = sendFutureA;
+			sendFutureA = next;
+		} else if (port == ComB)
+		{
+			old = sendFutureB;
+			sendFutureB = next;
+		} else if (port == ComC)
+		{
+			old = sendFutureC;
+			sendFutureC = next;
+		} else
+		{
+			old = sendFutureD;
+			sendFutureD = next;
+		}
+    	return old;
+    }
+    private void cancelCommand(SerialHelper port){
+    	Future<?> future = swapSendFuture(port, null);
+    	if (future != null)
+		{
+			future.cancel(true);
 		}
     }
     //----------------------------------------------------关闭串口
     private void CloseComPort(SerialHelper ComPort){
     	if (ComPort!=null){
+    		cancelCommand(ComPort);
     		ComPort.stopSend();
     		ComPort.close();
 		}
@@ -853,6 +1088,96 @@ public class ComToolActivity extends Activity {
 	}
 	private void saveSetting(String key, boolean value){
 		getSettings().edit().putBoolean(key, value).apply();
+	}
+	private void selectSavedItem(Spinner spinner, String key, int fallback){
+		if (spinner.getCount() <= 0)
+		{
+			return;
+		}
+		String saved = getSettings().getString(key, "");
+		int index = fallback;
+		if (saved != null && saved.length() > 0)
+		{
+			for (int i = 0; i < spinner.getCount(); i++)
+			{
+				Object item = spinner.getItemAtPosition(i);
+				if (item != null && saved.equals(item.toString()))
+				{
+					index = i;
+					break;
+				}
+			}
+		}
+		if (index >= spinner.getCount())
+		{
+			index = spinner.getCount() - 1;
+		}
+		if (index < 0)
+		{
+			index = 0;
+		}
+		spinner.setSelection(index);
+	}
+	private void savePortAndBaud(){
+		SharedPreferences.Editor editor = getSettings().edit();
+		putSpinnerValue(editor, KEY_PORT_A, SpinnerCOMA);
+		putSpinnerValue(editor, KEY_PORT_B, SpinnerCOMB);
+		putSpinnerValue(editor, KEY_PORT_C, SpinnerCOMC);
+		putSpinnerValue(editor, KEY_PORT_D, SpinnerCOMD);
+		putSpinnerValue(editor, KEY_BAUD_A, SpinnerBaudRateCOMA);
+		putSpinnerValue(editor, KEY_BAUD_B, SpinnerBaudRateCOMB);
+		putSpinnerValue(editor, KEY_BAUD_C, SpinnerBaudRateCOMC);
+		putSpinnerValue(editor, KEY_BAUD_D, SpinnerBaudRateCOMD);
+		editor.apply();
+	}
+	private void putSpinnerValue(SharedPreferences.Editor editor, String key, Spinner spinner){
+		Object item = spinner.getSelectedItem();
+		if (item != null)
+		{
+			editor.putString(key, item.toString());
+		}
+	}
+	private void applyInputMode(boolean txt){
+		AssistData.setTxtMode(txt);
+		if (txt)
+		{
+			KeyListener txtKeyListener = new TextKeyListener(Capitalize.NONE, false);
+			editTextCOMA.setKeyListener(txtKeyListener);
+			editTextCOMB.setKeyListener(txtKeyListener);
+			editTextCOMC.setKeyListener(txtKeyListener);
+			editTextCOMD.setKeyListener(txtKeyListener);
+			radioButtonTxt.setChecked(true);
+		} else
+		{
+			KeyListener hexKeyListener = new NumberKeyListener()
+			{
+				public int getInputType()
+				{
+					return InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE;
+				}
+				@Override
+				protected char[] getAcceptedChars()
+				{
+					return new char[]{'0','1','2','3','4','5','6','7','8','9',
+							'a','b','c','d','e','f','A','B','C','D','E','F',
+							' ','\n','\r'};
+				}
+			};
+			editTextCOMA.setKeyListener(hexKeyListener);
+			editTextCOMB.setKeyListener(hexKeyListener);
+			editTextCOMC.setKeyListener(hexKeyListener);
+			editTextCOMD.setKeyListener(hexKeyListener);
+			radioButtonHex.setChecked(true);
+		}
+		allowMultiLine(editTextCOMA);
+		allowMultiLine(editTextCOMB);
+		allowMultiLine(editTextCOMC);
+		allowMultiLine(editTextCOMD);
+	}
+	private void allowMultiLine(EditText edit){
+		edit.setSingleLine(false);
+		edit.setHorizontallyScrolling(false);
+		edit.setMaxLines(Integer.MAX_VALUE);
 	}
 	private void bindSendLogger(){
 		ComA.setOnDataSentListener(new SerialHelper.OnDataSentListener() {
@@ -956,16 +1281,29 @@ public class ComToolActivity extends Activity {
 				clearLogFile();
 			}
 		});
-		AlertDialog dialog = new AlertDialog.Builder(this)
-				.setTitle("设置")
+		final AlertDialog dialog = new AlertDialog.Builder(this)
 				.setView(content)
 				.create();
+		content.findViewById(R.id.buttonCloseSettings).setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				dialog.dismiss();
+			}
+		});
 		dialog.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
 			public void onDismiss(android.content.DialogInterface dialogInterface) {
 				dialogSaveCheck = null;
 			}
 		});
 		dialog.show();
+		View dialogParent = (View) content.getParent();
+		if (dialogParent != null)
+		{
+			dialogParent.setPadding(0, 0, 0, 0);
+		}
+		if (dialog.getWindow() != null)
+		{
+			dialog.getWindow().setBackgroundDrawableResource(R.color.card);
+		}
 	}
 	private boolean hasStoragePermission(){
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)

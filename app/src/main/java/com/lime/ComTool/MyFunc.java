@@ -50,6 +50,15 @@ public class MyFunc {
 	//转hex字符串转字节数组
     static public byte[] HexToByteArr(String inHex)//hex字符串转字节数组
 	{
+		if (inHex == null)
+		{
+			return new byte[0];
+		}
+		inHex = inHex.replaceAll("\\s+", "");
+		if (inHex.length() == 0)
+		{
+			return new byte[0];
+		}
 		int hexlen = inHex.length();
 		byte[] result;
 		if (isOdd(hexlen)==1)

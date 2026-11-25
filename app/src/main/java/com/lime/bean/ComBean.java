@@ -10,6 +10,7 @@ public class ComBean {
 		public static volatile boolean showMillis = false;
 		public byte[] bRec=null;
 		public String sRecTime="";
+		public long lRecTime=0;
 		public String sComPort="";
 		public ComBean(String sPort,byte[] buffer,int size){
 			sComPort=sPort;
@@ -18,8 +19,9 @@ public class ComBean {
 			{
 				bRec[i]=buffer[i];
 			}
+			lRecTime = System.currentTimeMillis();
 			String pattern = showMillis ? "hh:mm:ss.SSS" : "hh:mm:ss";
 			SimpleDateFormat sDateFormat = new SimpleDateFormat(pattern);
-			sRecTime = sDateFormat.format(new java.util.Date());
+			sRecTime = sDateFormat.format(new java.util.Date(lRecTime));
 		}
 }
