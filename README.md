@@ -19,22 +19,28 @@
 4. **接收数据**：根据需要处理接收到的数据，例如解析卡片信息。
 
 
-![ComTool](https://github.com/ligbyte/ComTool/blob/main/images/ComTool.png)
+![ComTool](https://raw.githubusercontent.com/ligbyte/ComTool/refs/heads/main/ComTool.png)
 
 ## 注意事项
 
 - 请确保Android设备支持串口通信，并已正确连接外设。
 - 在发送数据前，建议先进行串口测试，确保通信正常。
-- 如有任何问题或建议，欢迎提交Issue或Pull Request。
 
-## 贡献
 
-欢迎开发者贡献代码，共同完善这个串口通信助手工具。如果你有任何改进建议或新功能的想法，请随时联系我们。
+## Android Studio 版本
 
-## 许可证
+Android Studio Koala Feature Drop | 2024.1.2 RC 1
+Build #AI-241.18034.62.2412.12169539, built on August 1, 2024
+Runtime version: 17.0.11+0--11852314 amd64
+VM: OpenJDK 64-Bit Server VM by JetBrains s.r.o.
+Windows 11.0
+GC: G1 Young Generation, G1 Old Generation
+Memory: 4068M
+Cores: 20
+Non-Bundled Plugins:
+com.novelreader.plugin (1.0.0)
+Statistic (4.3.1)
+Dart (241.18808)
+io.flutter (85.2.1)
 
-本项目采用开源许可证，具体信息请查看LICENSE文件。
 
----
-
-希望这个串口通信助手能够帮助你在Android开发中更轻松地实现串口通信功能！
