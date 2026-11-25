@@ -2,24 +2,37 @@ package com.lime.ComTool;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.security.InvalidParameterException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import com.lime.bean.AssistBean;
 import com.lime.bean.ComBean;
+import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Configuration;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.Settings;
 import android.text.InputType;
 import android.text.method.KeyListener;
 import android.text.method.NumberKeyListener;
@@ -27,6 +40,8 @@ import android.text.method.TextKeyListener;
 import android.text.method.TextKeyListener.Capitalize;
 import android.util.Base64;
 import android.view.KeyEvent;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
@@ -56,6 +71,18 @@ public class ComToolActivity extends Activity {
 	SerialPortFinder mSerialPortFinder;//串口设备搜索
 	AssistBean AssistData;//用于界面数据序列化和反序列化
 	int iRecLines=0;//接收区行数
+	boolean showMillis=false;
+	boolean showTx=false;
+	boolean showMulti=false;
+	boolean showSaveLog=false;
+	CheckBox dialogSaveCheck;
+	ExecutorService logWriter;
+	static final String PREF_SETTINGS="ComToolSettings";
+	static final String KEY_MILLIS="show_millis";
+	static final String KEY_TX="show_tx";
+	static final String KEY_MULTI="show_multi";
+	static final String KEY_SAVE="save_log";
+	static final int REQ_STORAGE=1001;
     /** Called when the activity is first created. */
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -68,7 +95,10 @@ public class ComToolActivity extends Activity {
         DispQueue = new DispQueueThread();
         DispQueue.start();
         AssistData = getAssistData();
+        logWriter = Executors.newSingleThreadExecutor();
+        loadSettings();
         setControls();
+        bindSendLogger();
     }
     @Override
     public void onDestroy(){
@@ -77,7 +107,23 @@ public class ComToolActivity extends Activity {
     	CloseComPort(ComB);
     	CloseComPort(ComC);
     	CloseComPort(ComD);
+    	if (logWriter != null)
+		{
+			logWriter.shutdown();
+		}
     	super.onDestroy();
+    }
+    @Override
+    protected void onResume() {
+    	super.onResume();
+    	if (getSettings().getBoolean(KEY_SAVE, false) && hasStoragePermission())
+		{
+			showSaveLog = true;
+			if (dialogSaveCheck != null)
+			{
+				dialogSaveCheck.setChecked(true);
+			}
+		}
     }
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
@@ -87,7 +133,9 @@ public class ComToolActivity extends Activity {
 	  CloseComPort(ComC);
 	  CloseComPort(ComD);
       setContentView(R.layout.main);
+      loadSettings();
       setControls();
+      bindSendLogger();
     }
     
     //----------------------------------------------------
@@ -220,6 +268,7 @@ public class ComToolActivity extends Activity {
 		SpinnerBaudRateCOMC.setOnItemSelectedListener(new ItemSelectedEvent());
 		SpinnerBaudRateCOMD.setOnItemSelectedListener(new ItemSelectedEvent());
 		DispAssistData(AssistData);
+		applyPortVisibility();
 	}
     //----------------------------------------------------串口号或波特率变化时，关闭打开的串口
     class ItemSelectedEvent implements Spinner.OnItemSelectedListener{
@@ -686,26 +735,61 @@ public class ComToolActivity extends Activity {
     }
     //----------------------------------------------------显示接收数据
     private void DispRecData(ComBean ComRecData){
+    	appendLogLine(formatFrame(ComRecData.sRecTime, ComRecData.sComPort, false, ComRecData.bRec));
+    }
+    private void showSentFrame(final SerialHelper port, final byte[] data){
+    	if (!showTx || port == null || data == null)
+		{
+			return;
+		}
+    	final String line = formatFrame(currentTime(), port.getPort(), true, data);
+    	runOnUiThread(new Runnable()
+		{
+			public void run()
+			{
+				if (showTx)
+				{
+					appendLogLine(line);
+				}
+			}
+		});
+    }
+    private String currentTime(){
+    	String pattern = showMillis ? "hh:mm:ss.SSS" : "hh:mm:ss";
+    	return new SimpleDateFormat(pattern).format(new Date());
+    }
+    private String formatFrame(String time, String port, boolean sent, byte[] data){
     	StringBuilder sMsg=new StringBuilder();
-    	sMsg.append(ComRecData.sRecTime);
+    	sMsg.append(time);
     	sMsg.append("[");
-    	sMsg.append(ComRecData.sComPort);
+    	sMsg.append(port);
     	sMsg.append("]");
-    	if (radioButtonTxt.isChecked())
+    	if (showTx)
+		{
+			sMsg.append(sent ? "发送=> " : "接收=> ");
+		}
+    	if (radioButtonTxt != null && radioButtonTxt.isChecked())
 		{
 			sMsg.append("[Txt] ");
-			sMsg.append(new String(ComRecData.bRec));
-		}else if (radioButtonHex.isChecked()) {
+			sMsg.append(new String(data));
+		}else {
 			sMsg.append("[Hex] ");
-			sMsg.append(MyFunc.ByteArrToHex(ComRecData.bRec));
+			sMsg.append(MyFunc.ByteArrToHex(data));
 		}
     	sMsg.append("\r\n");
-    	editTextRecDisp.append(sMsg);
+    	return sMsg.toString();
+    }
+    private void appendLogLine(String line){
+    	editTextRecDisp.append(line);
     	iRecLines++;
-    	if ((iRecLines > 500) && (checkBoxAutoClear.isChecked()))//达到500项自动清除
+    	if ((iRecLines > 500) && (checkBoxAutoClear.isChecked()))
 		{
     		editTextRecDisp.setText("");
     		iRecLines=0;
+		}
+    	if (showSaveLog)
+		{
+			appendLogFile(line);
 		}
     }
     //----------------------------------------------------设置自动发送模式开关
@@ -755,4 +839,248 @@ public class ComToolActivity extends Activity {
   	{
   		Toast.makeText(this, sMsg, Toast.LENGTH_SHORT).show();
   	}
+
+	private SharedPreferences getSettings(){
+		return getSharedPreferences(PREF_SETTINGS, Context.MODE_PRIVATE);
+	}
+	private void loadSettings(){
+		SharedPreferences pref = getSettings();
+		showMillis = pref.getBoolean(KEY_MILLIS, false);
+		showTx = pref.getBoolean(KEY_TX, false);
+		showMulti = pref.getBoolean(KEY_MULTI, false);
+		showSaveLog = pref.getBoolean(KEY_SAVE, false) && hasStoragePermission();
+		ComBean.showMillis = showMillis;
+	}
+	private void saveSetting(String key, boolean value){
+		getSettings().edit().putBoolean(key, value).apply();
+	}
+	private void bindSendLogger(){
+		ComA.setOnDataSentListener(new SerialHelper.OnDataSentListener() {
+			public void onDataSent(byte[] data) { showSentFrame(ComA, data); }
+		});
+		ComB.setOnDataSentListener(new SerialHelper.OnDataSentListener() {
+			public void onDataSent(byte[] data) { showSentFrame(ComB, data); }
+		});
+		ComC.setOnDataSentListener(new SerialHelper.OnDataSentListener() {
+			public void onDataSent(byte[] data) { showSentFrame(ComC, data); }
+		});
+		ComD.setOnDataSentListener(new SerialHelper.OnDataSentListener() {
+			public void onDataSent(byte[] data) { showSentFrame(ComD, data); }
+		});
+	}
+	private void applyPortVisibility(){
+		int extra = showMulti ? View.VISIBLE : View.GONE;
+		setViewVisibility(R.id.LinearLayoutCOMB, extra);
+		setViewVisibility(R.id.LinearLayoutCOMC, extra);
+		setViewVisibility(R.id.LinearLayoutCOMD, extra);
+		setViewVisibility(R.id.LinearLayoutCOMCD, extra);
+		if (!showMulti)
+		{
+			if (toggleButtonCOMB != null && toggleButtonCOMB.isChecked()) toggleButtonCOMB.setChecked(false);
+			if (toggleButtonCOMC != null && toggleButtonCOMC.isChecked()) toggleButtonCOMC.setChecked(false);
+			if (toggleButtonCOMD != null && toggleButtonCOMD.isChecked()) toggleButtonCOMD.setChecked(false);
+			CloseComPort(ComB);
+			CloseComPort(ComC);
+			CloseComPort(ComD);
+		}
+	}
+	private void setViewVisibility(int id, int visibility){
+		View view = findViewById(id);
+		if (view != null)
+		{
+			view.setVisibility(visibility);
+		}
+	}
+	@Override
+	public boolean onCreateOptionsMenu(Menu menu){
+		getMenuInflater().inflate(R.menu.menu_main, menu);
+		return true;
+	}
+	@Override
+	public boolean onOptionsItemSelected(MenuItem item){
+		if (item.getItemId() == R.id.action_settings)
+		{
+			showSettingsDialog();
+			return true;
+		}
+		return super.onOptionsItemSelected(item);
+	}
+	private void showSettingsDialog(){
+		View content = getLayoutInflater().inflate(R.layout.dialog_settings, null);
+		final CheckBox checkMillis = (CheckBox)content.findViewById(R.id.checkShowMillis);
+		final CheckBox checkTx = (CheckBox)content.findViewById(R.id.checkShowTx);
+		final CheckBox checkMulti = (CheckBox)content.findViewById(R.id.checkShowMulti);
+		final CheckBox checkSave = (CheckBox)content.findViewById(R.id.checkSaveLog);
+		Button clearLog = (Button)content.findViewById(R.id.buttonClearLog);
+		checkMillis.setChecked(showMillis);
+		checkTx.setChecked(showTx);
+		checkMulti.setChecked(showMulti);
+		checkSave.setChecked(getSettings().getBoolean(KEY_SAVE, false));
+		dialogSaveCheck = checkSave;
+		checkMillis.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+			public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+				showMillis = isChecked;
+				ComBean.showMillis = isChecked;
+				saveSetting(KEY_MILLIS, isChecked);
+			}
+		});
+		checkTx.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+			public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+				showTx = isChecked;
+				saveSetting(KEY_TX, isChecked);
+			}
+		});
+		checkMulti.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+			public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+				showMulti = isChecked;
+				saveSetting(KEY_MULTI, isChecked);
+				applyPortVisibility();
+			}
+		});
+		checkSave.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+			public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+				if (isChecked && !hasStoragePermission())
+				{
+					saveSetting(KEY_SAVE, true);
+					showSaveLog = false;
+					requestStoragePermission();
+					ShowMessage("请授予存储权限后再保存日志");
+					return;
+				}
+				showSaveLog = isChecked;
+				saveSetting(KEY_SAVE, isChecked);
+			}
+		});
+		clearLog.setOnClickListener(new View.OnClickListener() {
+			public void onClick(View v) {
+				clearLogFile();
+			}
+		});
+		AlertDialog dialog = new AlertDialog.Builder(this)
+				.setTitle("设置")
+				.setView(content)
+				.create();
+		dialog.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
+			public void onDismiss(android.content.DialogInterface dialogInterface) {
+				dialogSaveCheck = null;
+			}
+		});
+		dialog.show();
+	}
+	private boolean hasStoragePermission(){
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+		{
+			return Environment.isExternalStorageManager();
+		}
+		return checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+	}
+	private void requestStoragePermission(){
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+		{
+			try
+			{
+				Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+				intent.setData(Uri.parse("package:" + getPackageName()));
+				startActivity(intent);
+			}
+			catch (Exception e)
+			{
+				startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+			}
+		}
+		else
+		{
+			requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+		}
+	}
+	@Override
+	public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults){
+		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+		if (requestCode == REQ_STORAGE)
+		{
+			showSaveLog = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED
+					&& getSettings().getBoolean(KEY_SAVE, false);
+			if (dialogSaveCheck != null)
+			{
+				dialogSaveCheck.setOnCheckedChangeListener(null);
+				dialogSaveCheck.setChecked(showSaveLog);
+				dialogSaveCheck.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+					public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+						if (isChecked && !hasStoragePermission())
+						{
+							saveSetting(KEY_SAVE, true);
+							showSaveLog = false;
+							requestStoragePermission();
+							ShowMessage("请授予存储权限后再保存日志");
+							return;
+						}
+						showSaveLog = isChecked;
+						saveSetting(KEY_SAVE, isChecked);
+					}
+				});
+			}
+			if (!showSaveLog && getSettings().getBoolean(KEY_SAVE, false) && grantResults.length > 0
+					&& grantResults[0] != PackageManager.PERMISSION_GRANTED)
+			{
+				saveSetting(KEY_SAVE, false);
+				ShowMessage("未授予存储权限，已关闭保存日志");
+			}
+		}
+	}
+	private File logFile(){
+		return new File(Environment.getExternalStorageDirectory(), "com_log.txt");
+	}
+	private void appendLogFile(final String line){
+		if (logWriter == null)
+		{
+			return;
+		}
+		logWriter.execute(new Runnable() {
+			public void run() {
+				FileOutputStream out = null;
+				try
+				{
+					out = new FileOutputStream(logFile(), true);
+					out.write(line.getBytes("UTF-8"));
+				}
+				catch (Exception e)
+				{
+					e.printStackTrace();
+				}
+				finally
+				{
+					if (out != null)
+					{
+						try { out.close(); } catch (IOException ignored) {}
+					}
+				}
+			}
+		});
+	}
+	private void clearLogFile(){
+		if (!hasStoragePermission())
+		{
+			requestStoragePermission();
+			ShowMessage("请授予存储权限后再清除日志");
+			return;
+		}
+		if (logWriter == null)
+		{
+			return;
+		}
+		logWriter.execute(new Runnable() {
+			public void run() {
+				File file = logFile();
+				final boolean missing = !file.exists();
+				final boolean deleted = !missing && file.delete();
+				runOnUiThread(new Runnable() {
+					public void run() {
+						if (missing) ShowMessage("日志文件不存在");
+						else if (deleted) ShowMessage("已清除 /sdcard/com_log.txt");
+						else ShowMessage("清除日志失败");
+					}
+				});
+			}
+		});
+	}
 }

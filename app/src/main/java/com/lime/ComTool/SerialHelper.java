@@ -58,10 +58,21 @@ public abstract class SerialHelper{
 		_isOpen=false;
 	}
 	//----------------------------------------------------
+	public interface OnDataSentListener {
+		void onDataSent(byte[] data);
+	}
+	private OnDataSentListener mOnDataSentListener;
+	public void setOnDataSentListener(OnDataSentListener listener) {
+		mOnDataSentListener = listener;
+	}
 	public void send(byte[] bOutArray){
 		try
 		{
 			mOutputStream.write(bOutArray);
+			if (mOnDataSentListener != null && bOutArray != null)
+			{
+				mOnDataSentListener.onDataSent(bOutArray);
+			}
 		} catch (IOException e)
 		{
 			e.printStackTrace();

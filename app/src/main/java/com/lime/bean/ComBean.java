@@ -7,6 +7,7 @@ import java.text.SimpleDateFormat;
  *串口数据
  */
 public class ComBean {
+		public static volatile boolean showMillis = false;
 		public byte[] bRec=null;
 		public String sRecTime="";
 		public String sComPort="";
@@ -17,7 +18,8 @@ public class ComBean {
 			{
 				bRec[i]=buffer[i];
 			}
-			SimpleDateFormat sDateFormat = new SimpleDateFormat("hh:mm:ss");       
-			sRecTime = sDateFormat.format(new java.util.Date()); 
+			String pattern = showMillis ? "hh:mm:ss.SSS" : "hh:mm:ss";
+			SimpleDateFormat sDateFormat = new SimpleDateFormat(pattern);
+			sRecTime = sDateFormat.format(new java.util.Date());
 		}
 }
