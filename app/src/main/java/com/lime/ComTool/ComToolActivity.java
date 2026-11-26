@@ -80,9 +80,12 @@ public class ComToolActivity extends Activity {
 	int iRecLines=0;//接收区行数
 	final ArrayList<Long> logTimes = new ArrayList<Long>();
 	boolean showMillis=false;
+	boolean showCount=false;
 	boolean showTx=false;
 	boolean showMulti=false;
 	boolean showSaveLog=false;
+	int sendCount=0;
+	TextView textSendCount;
 	boolean persistSpinners=false;
 	CheckBox dialogSaveCheck;
 	ExecutorService logWriter;
@@ -91,6 +94,7 @@ public class ComToolActivity extends Activity {
 	static final int REPLY_TIMEOUT_MS=10;
 	static final String PREF_SETTINGS="ComToolSettings";
 	static final String KEY_MILLIS="show_millis";
+	static final String KEY_COUNT="show_count";
 	static final String KEY_TX="show_tx";
 	static final String KEY_MULTI="show_multi";
 	static final String KEY_SAVE="save_log";
@@ -217,6 +221,8 @@ public class ComToolActivity extends Activity {
     	SpinnerBaudRateCOMD=(Spinner)findViewById(R.id.SpinnerBaudRateCOMD);
     	radioButtonTxt=(RadioButton)findViewById(R.id.radioButtonTxt);
     	radioButtonHex=(RadioButton)findViewById(R.id.radioButtonHex);
+    	textSendCount=(TextView)findViewById(R.id.textSendCount);
+    	updateSendCount();
     	
     	editTextCOMA.setOnEditorActionListener(new EditorActionEvent());
 		editTextCOMB.setOnEditorActionListener(new EditorActionEvent());
@@ -472,12 +478,16 @@ public class ComToolActivity extends Activity {
 			} else if (v.getId() == R.id.ButtonCopy){
 				copyLog();
 			} else if (v== ButtonSendCOMA){
+				countSendClick();
 				sendPortData(ComA, editTextCOMA.getText().toString());
 			}else if (v== ButtonSendCOMB){
+				countSendClick();
 				sendPortData(ComB, editTextCOMB.getText().toString());
 			}else if (v== ButtonSendCOMC){
+				countSendClick();
 				sendPortData(ComC, editTextCOMC.getText().toString());
 			}else if (v== ButtonSendCOMD){
+				countSendClick();
 				sendPortData(ComD, editTextCOMD.getText().toString());
 			}		
 		}
@@ -908,6 +918,18 @@ public class ComToolActivity extends Activity {
     	logTimes.clear();
     	iRecLines = 0;
     }
+    private void countSendClick(){
+    	sendCount++;
+    	updateSendCount();
+    }
+    private void updateSendCount(){
+    	if (textSendCount == null)
+		{
+			return;
+		}
+    	textSendCount.setText("计数：" + sendCount);
+    	textSendCount.setVisibility(showCount ? View.VISIBLE : View.GONE);
+    }
     private void copyLog(){
     	CharSequence text = editTextRecDisp.getText();
     	if (text == null || text.length() == 0)
@@ -1081,6 +1103,7 @@ public class ComToolActivity extends Activity {
 	private void loadSettings(){
 		SharedPreferences pref = getSettings();
 		showMillis = pref.getBoolean(KEY_MILLIS, false);
+		showCount = pref.getBoolean(KEY_COUNT, false);
 		showTx = pref.getBoolean(KEY_TX, false);
 		showMulti = pref.getBoolean(KEY_MULTI, false);
 		showSaveLog = pref.getBoolean(KEY_SAVE, false) && hasStoragePermission();
@@ -1233,11 +1256,13 @@ public class ComToolActivity extends Activity {
 	private void showSettingsDialog(){
 		View content = getLayoutInflater().inflate(R.layout.dialog_settings, null);
 		final CheckBox checkMillis = (CheckBox)content.findViewById(R.id.checkShowMillis);
+		final CheckBox checkCount = (CheckBox)content.findViewById(R.id.checkShowCount);
 		final CheckBox checkTx = (CheckBox)content.findViewById(R.id.checkShowTx);
 		final CheckBox checkMulti = (CheckBox)content.findViewById(R.id.checkShowMulti);
 		final CheckBox checkSave = (CheckBox)content.findViewById(R.id.checkSaveLog);
 		Button clearLog = (Button)content.findViewById(R.id.buttonClearLog);
 		checkMillis.setChecked(showMillis);
+		checkCount.setChecked(showCount);
 		checkTx.setChecked(showTx);
 		checkMulti.setChecked(showMulti);
 		checkSave.setChecked(getSettings().getBoolean(KEY_SAVE, false));
@@ -1247,6 +1272,13 @@ public class ComToolActivity extends Activity {
 				showMillis = isChecked;
 				ComBean.showMillis = isChecked;
 				saveSetting(KEY_MILLIS, isChecked);
+			}
+		});
+		checkCount.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+			public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+				showCount = isChecked;
+				saveSetting(KEY_COUNT, isChecked);
+				updateSendCount();
 			}
 		});
 		checkTx.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {

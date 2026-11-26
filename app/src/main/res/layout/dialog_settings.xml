@@ -51,6 +51,14 @@
             android:textSize="15sp" />
 
         <CheckBox
+            android:id="@+id/checkShowCount"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="40dp"
+            android:text="显示计数"
+            android:textSize="15sp" />
+
+        <CheckBox
             android:id="@+id/checkShowTx"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
